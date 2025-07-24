@@ -522,5 +522,3 @@ Partitioning by fields like `date`, `source`, or `region` can improve query perf
 # 12\. To Be Continued
 
 That’s all I’ve got written down for now, but I still have some ideas for what the next chapters could be. I think I’ll keep expanding this guide in the future.
-
-## 
