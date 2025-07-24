@@ -48,7 +48,7 @@ Because of these factors, it’s hard to predict the number of partitions Spark 
 
 ### Unions
 
-It’s not widely known, but `union` of in most cases does not trigger a shuffle. Existing partitions stay where they are, and the resulting DataFrame simply combines all of them. So, the number of partitions will be the sum of all input DataFrames’ partitions.
+It’s not widely known, but `union` in most cases does not trigger a shuffle. Existing partitions stay where they are, and the resulting DataFrame simply combines all of them. So, the number of partitions will be the sum of all input DataFrames’ partitions.
 
 This is important when combining many DataFrames — check the resulting partition count after the union and act accordingly.
 
@@ -57,11 +57,11 @@ This is important when combining many DataFrames — check the resulting partiti
 Another case where the number of partitions may unexpectedly change is when using `orderBy`. The way Spark implements this method can result in an unpredictable number of partitions — and in some cases, data skew.
 
 This is tricky because you typically don’t want to repartition an already sorted DataFrame. One potential solution is to introduce a new column with a random number, sort by your desired column(s) and the random column, then drop the random one:
-
-`df.withColumn("random", round(rand() * 200)) \`  
-  `.orderBy(desc("actual_order"), desc("random")) \`  
-  `.drop("random")`
-
+```scala
+df.withColumn("random", round(rand() * 200)) 
+  .orderBy(desc("actual_order"), desc("random"))  
+  .drop("random")`
+```
 This gives you a sorted DataFrame with more partitions and reduced skew.  
  More details: [Spark orderBy implementation – CloudSqale](https://cloudsqale.com/2023/11/26/spark-order-by-implementation/)
 
@@ -73,7 +73,7 @@ This method is well-known for triggering a full shuffle and changing the number 
 
 * `.repartition(col)` or `.repartition(col1, col2, ...)` — uses a hash of the column(s) to assign rows to partitions. To decide how many partitions to create Spark will use `spark.default.parallelism` if set or it will infer the partition count based on upstream RDDs.
 
-* `.repartition(n, col)` — does both: sets the number of partitions and uses a hash on the specified column(s).
+* `.repartition(n, col)` — does both: sets the number of partitions and uses a hash based on the specified column(s).
 
 These variants all perform a full shuffle, using a hash-based partitioning strategy internally. Especially if you provide columns yourself, this may result in imbalanced partitions, and in some cases, even empty ones.
 
@@ -111,9 +111,9 @@ To use resources efficiently, you need to understand the available memory, CPU c
 
 But the same isn’t always true in cloud deployments, where Spark jobs often run in isolated, on-demand clusters.In this case, you need to understand the specs of your worker nodes. How much memory and how many cores each one has—and calculate how many executor containers will fit.
 
-For example, if a worker node has 32 cores and 256 GB of RAM, and you configure each executor with 6 cores and 64 GB RAM, basic math suggests that 4 executors can run per node. They’ll use 24 cores and all 256 GB of RAM. That leaves 8 cores idle. But in reality, it's often worse. Due to memory overhead, Spark may only launch 3 executors per node, depending on the configured memory overhead settings \- wasting 64 GB of memory and 18 CPU cores.
+For example, if a worker node has 32 cores and 256 GB of RAM, and you configure each executor with 6 cores and 64 GB RAM, basic math suggests that 4 executors can run per node. They’ll use 24 cores and all 256 GB of RAM. That leaves 8 cores idle. But in reality, it's often worse. Due to memory overhead, Spark may only launch 3 executors per node, depending on the configured memory overhead settings \- wasting part of 64 GB and 18 CPU cores.
 
-Choosing the right executor configuration isn’t just about assigning as much as you can. You also need to consider how much your job *actually* needs. This isn't always easy to determine because there's a point when adding more resources may lead to diminishing returns. A good starting point is to identify the minimum number of CPU cores and the memory needed to run the job. From there, you can look for the sweet spot between performance, cost, and cluster utilization. You can usually estimate the number of needed cores based on the number of partitions you expect to run in parallel, which in turn can help to determine how many executors and how much memory you’ll need. More on that below.
+Choosing the right executor configuration isn’t just about assigning as much resources as you can. You also need to consider how much your job actually needs. This isn't always easy to determine because there's a point when adding more resources may lead to diminishing returns. A good starting point is to identify the minimum number of CPU cores and the memory needed to run the job. From there, you can look for the sweet spot between performance, cost, and cluster utilization. You can usually estimate the number of needed cores based on the number of partitions you expect to run in parallel, which in turn can help to determine how many executors and how much memory you’ll need. More on that below.
 
 ### 2.3.2 Optimal Number of Cores and Memory per Executor
 
@@ -137,13 +137,13 @@ Big executors have some benefits too. Broadcasting data is more memory-efficient
 
 A common starting point is to assign 2–5 cores and 8–32GB of memory per executor. Don’t treat these numbers as strict rules—your ideal setup depends heavily on your specific workload and available resources. Use them as a baseline and test how your job behaves with different configurations.
 
-If you're using Spark's dynamic allocation, keep in mind that executors count can change automatically at runtime. With this feature enabled, Spark will add or remove executors based on the workload, which helps optimize resource usage across multiple jobs or stages. While dynamic allocation is useful in shared or elastic environments (like YARN or Kubernetes), it can sometimes conflict with manual tuning, especially if your job relies on consistent executor sizes or cached data. It's important to test how your application behaves with and without it before deciding on static versus dynamic resource configuration. Dynamic allocation and other relevant mechanisms will be discussed later.
+If you're using Spark's dynamic allocation, keep in mind that executors count can change automatically at runtime. With this feature enabled, Spark will add or remove executors based on the workload, which helps optimize resource usage across multiple jobs or stages. While dynamic allocation is useful in shared or elastic environments (like YARN or Kubernetes), it can sometimes conflict with manual tuning, especially if your job relies on consistent executor sizes or cached data. It's important to test how your application behaves with and without it before deciding on static versus dynamic resource configuration. Caching and dynamic allocation will be discussed later.
 
 If you're using HDFS and YARN, it’s often said that 5 cores per executor works best, due to how HDFS handles I/O. While that advice is a bit dated, it still gets mentioned, but with modern hardware and storage systems, this should be validated for your workload.
 
 Finally, if you're running on an isolated cluster and know your hardware specs, remember to leave some resources for the operating system and your cluster scheduler.
 
-### 2.3.4 How to Pick the Right Numbers
+### 2.3.3 How to Pick the Right Numbers
 
 To sum up the information available earlier, I prepared a simple step by step plan on how to pick the right number of executors and their specifications. Please note that you may actually make better decisions if you read next chapters, especially those on Spark memory model.
 
@@ -181,11 +181,13 @@ Before Spark applies any configuration, it reserves 300 MB of this heap memory f
 
 The rest (about 11.9 GB of heap memory) is left for Spark’s internal bookkeeping, user data structures, task metadata, and other JVM operations outside of the unified memory pool.
 
-Unified memory is further divided into execution memory and storage memory, controlled by the `spark.memory.storageFraction` parameter (default 0.5). This gives each pool roughly 8.9 GB. Spark dynamically adjusts this split at runtime — if execution needs more space, it can borrow from storage by evicting cached blocks. However, the opposite is not allowed: storage cannot reclaim execution memory. If eviction happens frequently, it can negatively impact performance, so tuning these settings may be necessary for cache-heavy or memory-intensive workloads.
+Unified memory is further divided into execution memory and storage memory, controlled by the `spark.memory.storageFraction` parameter (default 0.5). This gives each pool roughly 8.9 GB. Spark dynamically adjusts this split at runtime — if execution needs more space, it can borrow from storage by evicting cached blocks. However, the other way araound is not possible: storage cannot reclaim execution memory if it's needed, therefore sometimes cache will claim all unified memory just to be evicted moments later. If eviction happens frequently, it can negatively impact performance, so tuning these settings may be necessary for cache-heavy or memory-intensive workloads.
 
 On top of the JVM heap memory (`spark.executor.memory`), Spark also allocates additional memory called *memory overhead*, configured via `spark.executor.memoryOverhead` or calculated using `spark.executor.memoryOverheadFactor`. This memory is outside of the executor heap and is used by the container for off-heap allocations, shuffle buffers, native libraries, and other non-heap tasks.
 
 If `spark.executor.memoryOverhead` is not set explicitly, Spark will use the larger of 384 MB or the value calculated by `spark.executor.memoryOverheadFactor * spark.executor.memory`. This distinction is important when allocating executor resources in a cluster, especially under YARN or Kubernetes, where the total container memory \= executor memory \+ memory overhead.
+
+![Heap + memory overhead](../images/spark_memory_model_small.png)
 
 If your application uses off-heap memory explicitly (e.g., with Tungsten or native libraries), and you're running Spark 3.0 or later, be aware of the `spark.memory.offHeap.size` setting. This defines an additional off-heap memory pool and must be considered separately from memory overhead. It’s not part of the JVM heap and not part of the memory overhead either — it is extra memory that your executor container will consume, and must be accounted for when sizing executors.
 
@@ -512,7 +514,7 @@ Uneven file sizes may indicate data skew. Skewed data can cause some tasks to pr
 Columnar format like Parquet or ORC enable column pruning and predicate pushdown which benefits performance. Avro offers robust schema evolution and schema registries. Parquet supports limited schema evolution but is better suited for read-optimized analytics. CSV and JSON are human-readable, but they lack optimizations and compression efficiency.
 
 **What compression algorithm is used? Does it suit the data and workload?**  
-For example, Zstd offers better compression ratios and decompression speed compared to Gzip in many use cases. Choose compression based on read/write patterns and CPU trade-offs.
+For example, Zstd offers better compression ratios and decompression speed compared to other algorithms in many use cases. Choose compression based on read/write patterns and CPU trade-offs.
 
 **Is the data partitioned logically and efficiently? Should it be?**  
 Partitioning by fields like `date`, `source`, or `region` can improve query performance and reduce shuffle volume—if used appropriately.
